@@ -2,8 +2,8 @@
 
 A **simple** object detection app using the latest **Ultralytics YOLO26** model.
 
-- Take a photo from your **webcam**
-- Or **upload** one or more images from your laptop
+- **Live webcam** — continuous video with detections drawn in real time
+- **Upload images** — pick one or more images from your laptop
 
 ---
 
@@ -36,9 +36,10 @@ The first run downloads `yolo26n.pt` (YOLO26 nano) automatically.
 
 ## How to use
 
-1. In the sidebar, pick **Webcam** or **Upload images**.
+1. In the sidebar, pick **Live webcam** or **Upload images**.
 2. Adjust the **confidence threshold** if you want fewer/more detections.
-3. Take a photo or select images — boxes and labels appear on the result.
+3. **Live webcam:** click **START**, allow camera access — boxes update on the live stream.
+4. **Upload images:** select files — originals and detections appear side by side.
 
 ---
 
@@ -78,5 +79,6 @@ Dockerfile          # Container deployment
 ## Notes
 
 - Model: `yolo26n.pt` (nano) — fast and small. Swap to `yolo26s.pt` / `yolo26m.pt` in `app.py` for higher accuracy.
-- Webcam uses the browser camera (`st.camera_input`), so it works locally and on Streamlit Cloud.
+- Live webcam uses `streamlit-webrtc` (browser camera in, annotated video out).
 - Weights are downloaded on first use and are git-ignored (`*.pt`).
+

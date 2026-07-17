@@ -4,14 +4,16 @@ Simple YOLO Object Detection App
 Uses Ultralytics YOLO26 (latest) with a Streamlit UI.
 
 Modes:
-  1. Webcam  – take a photo from your camera
-  2. Images  – upload one or more images from your laptop
+  1. Live webcam – continuous video with detections drawn in real time
+  2. Images      – upload one or more images from your laptop
 """
 
-import streamlit as st
-from ultralytics import YOLO
-from PIL import Image
+import av
 import numpy as np
+import streamlit as st
+from PIL import Image
+from streamlit_webrtc import RTCConfiguration, WebRtcMode, webrtc_streamer
+from ultralytics import YOLO
 
 
 # ---------------------------------------------------------------------------
@@ -24,7 +26,7 @@ st.set_page_config(
 )
 
 st.title("YOLO Object Detection")
-st.caption("Latest Ultralytics YOLO26 — webcam or image upload")
+st.caption("Latest Ultralytics YOLO26 — live webcam or image upload")
 
 
 # ---------------------------------------------------------------------------
@@ -41,11 +43,12 @@ model = load_model()
 
 
 # ---------------------------------------------------------------------------
-# Sidebar controls
+# Shared settings (used by both live video and image upload)
+# Stored in a dict so the live-video callback can read the latest value
+# even while the WebRTC thread is running.
 # ---------------------------------------------------------------------------
 st.sidebar.header("Settings")
 
-# Confidence threshold: how sure the model must be to keep a detection
 confidence = st.sidebar.slider(
     "Confidence threshold",
     min_value=0.1,
@@ -54,54 +57,87 @@ confidence = st.sidebar.slider(
     step=0.05,
 )
 
-# Choose input source
+# Mutable holder so the live callback always sees the current slider value
+settings = st.session_state.setdefault("settings", {})
+settings["confidence"] = confidence
+
 mode = st.sidebar.radio(
     "Input source",
-    options=["Webcam", "Upload images"],
+    options=["Live webcam", "Upload images"],
 )
 
 
 # ---------------------------------------------------------------------------
-# Helper: run detection on a PIL image and return the annotated image
+# Helper: run detection on a BGR numpy frame (OpenCV / WebRTC format)
 # ---------------------------------------------------------------------------
-def detect(image: Image.Image) -> Image.Image:
+def detect_bgr(frame_bgr: np.ndarray, conf: float) -> np.ndarray:
     """
-    Run YOLO on one image.
+    Run YOLO on one BGR frame and return an annotated BGR frame.
 
     Args:
-        image: PIL Image (RGB)
+        frame_bgr: H×W×3 uint8 image in BGR order
+        conf:      minimum confidence to keep a detection
 
     Returns:
-        Annotated PIL Image with boxes and labels drawn on it
+        Annotated BGR frame with boxes and labels drawn on it
     """
-    # YOLO expects a numpy array (BGR or RGB both work; we pass RGB)
-    results = model.predict(np.array(image), conf=confidence, verbose=False)
+    results = model.predict(frame_bgr, conf=conf, verbose=False)
+    return results[0].plot()  # already BGR with drawings
 
-    # results[0].plot() returns a BGR numpy array with drawings
-    annotated_bgr = results[0].plot()
 
-    # Convert BGR → RGB for correct colors in Streamlit / PIL
+# ---------------------------------------------------------------------------
+# Helper: run detection on a PIL image (for the upload mode)
+# ---------------------------------------------------------------------------
+def detect_pil(image: Image.Image) -> Image.Image:
+    """Run YOLO on a PIL RGB image; return an annotated PIL RGB image."""
+    # Convert RGB → BGR for the shared helper, then back to RGB for display
+    rgb = np.array(image)
+    bgr = rgb[:, :, ::-1]
+    annotated_bgr = detect_bgr(bgr, settings["confidence"])
     annotated_rgb = annotated_bgr[:, :, ::-1]
     return Image.fromarray(annotated_rgb)
 
 
 # ---------------------------------------------------------------------------
-# Mode 1: Webcam
-# st.camera_input opens the browser camera and returns a single snapshot
+# Mode 1: Live webcam (continuous video in + detections out)
+# streamlit-webrtc streams the camera over WebRTC and calls our callback
+# on every frame so YOLO can annotate and send the result back live.
 # ---------------------------------------------------------------------------
-if mode == "Webcam":
-    st.subheader("Webcam")
-    photo = st.camera_input("Take a photo")
+if mode == "Live webcam":
+    st.subheader("Live webcam")
+    st.write(
+        "Click **START**, allow camera access, then watch detections "
+        "update on the live stream."
+    )
 
-    if photo is not None:
-        image = Image.open(photo).convert("RGB")
-        with st.spinner("Detecting objects..."):
-            result = detect(image)
+    # Public STUN server helps the browser connect (needed on cloud deploys)
+    rtc_config = RTCConfiguration(
+        {"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
+    )
 
-        # Show original and result side by side
-        col1, col2 = st.columns(2)
-        col1.image(image, caption="Original", use_container_width=True)
-        col2.image(result, caption="Detections", use_container_width=True)
+    def video_frame_callback(frame: av.VideoFrame) -> av.VideoFrame:
+        """
+        Called for every webcam frame.
+        Input  → raw camera frame
+        Output → same frame with YOLO boxes/labels drawn on it
+        """
+        # Convert the WebRTC frame to a numpy BGR image
+        img = frame.to_ndarray(format="bgr24")
+
+        # Run YOLO and draw boxes
+        annotated = detect_bgr(img, settings["confidence"])
+
+        # Send the annotated frame back to the browser
+        return av.VideoFrame.from_ndarray(annotated, format="bgr24")
+
+    webrtc_streamer(
+        key="yolo-live",
+        mode=WebRtcMode.SENDRECV,  # send camera up, receive annotated video
+        rtc_configuration=rtc_config,
+        video_frame_callback=video_frame_callback,
+        media_stream_constraints={"video": True, "audio": False},
+        async_processing=True,  # process frames without blocking the UI
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -120,7 +156,7 @@ else:
         for file in files:
             image = Image.open(file).convert("RGB")
             with st.spinner(f"Detecting objects in {file.name}..."):
-                result = detect(image)
+                result = detect_pil(image)
 
             st.markdown(f"**{file.name}**")
             col1, col2 = st.columns(2)
