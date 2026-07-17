@@ -1,0 +1,10 @@
+# Core app
+streamlit>=1.40.0
+
+# Latest Ultralytics YOLO (includes YOLO26)
+ultralytics>=8.4.0
+
+# Image handling (usually pulled in by the packages above; listed for clarity)
+pillow>=10.0.0
+numpy>=1.24.0
+opencv-python-headless>=4.8.0

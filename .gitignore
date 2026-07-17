@@ -216,3 +216,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# YOLO model weights (downloaded on first run)
+*.pt
+*.onnx
+*.engine
+runs/

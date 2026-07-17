@@ -1,0 +1,4 @@
+# System packages for Streamlit Community Cloud / Linux hosts
+# OpenCV needs these libraries to run
+libgl1
+libglib2.0-0
